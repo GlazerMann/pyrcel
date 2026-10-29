@@ -29,6 +29,7 @@ import numpy as np
 
 from . import constants as c
 from .activation import binned_activation
+from .activation._common import _kohler_crit_approx
 from .console_report import (
     LiveStepPrinter,
     PhaseTimer,
@@ -444,12 +445,12 @@ class ParcelModel:
             eq, kn, _, _ = binned_activation(
                 S_max, T_smax, rs_smax[offset : offset + nr], aer.r_drys, aer.Nis, aer.kappa
             )
-            _, nd_frac, _, _ = binned_activation(
-                S_max, T_nd, rs_nd[offset : offset + nr], aer.r_drys, aer.Nis, aer.kappa
-            )
+            r_crits, _ = _kohler_crit_approx(T_nd, aer.r_drys, aer.kappa)
+            nd_mask = rs_nd[offset : offset + nr] >= np.asarray(r_crits)
             offset += nr
             N = float(np.sum(aer.Nis))
-            Nd_mode = float(nd_frac) * N
+            Nd_mode = float(np.sum(aer.Nis[nd_mask]))
+            nd_frac = Nd_mode / N if N > 0 else 0.0
             per_species.append(
                 {
                     "species": aer.species,
