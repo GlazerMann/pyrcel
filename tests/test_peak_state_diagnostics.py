@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from pyrcel import AerosolSpecies, ParcelModel
+from pyrcel import constants as c
 from pyrcel.activation import binned_activation
 from pyrcel.integrator import find_smax
 
@@ -22,6 +23,11 @@ def test_event_peak_diagnostics_use_event_state(live):
     )
     assert float(eq) == 1.0 and float(kn) == 1.0
     n_act = float(eq) * np.sum(aerosol.Nis)
+    if len(model.args) == 6:
+        # The sixth parameter fixes initial dry-air density. Compare the
+        # concentration at the peak using the independent ideal-gas relation.
+        rho_peak = y_peak[1] / (c.Rd * y_peak[2] * (1 + y_peak[3] / c.epsilon))
+        n_act *= float(rho_peak) / float(model.args[5])
 
     model.run(
         300.0,
