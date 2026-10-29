@@ -50,6 +50,7 @@ from .integrator import (
     terminate_cutoff_time,
 )
 from .model_output import ModelOutput
+from .parcel_aux import dry_air_density
 from .updraft import AbstractUpdraft
 
 __all__ = ["ParcelModel"]
@@ -147,6 +148,7 @@ class ParcelModel:
             )
         self._equil_elapsed = time.perf_counter() - t0
         self.y0 = np.asarray(y0)
+        self._rho_d0 = float(dry_air_density(self.y0))
         self._equil_residual = equilibration_residual(
             self.T0, self.S0, self._r_drys, self._kappas, self.y0[c.N_STATE_VARS :]
         )
@@ -175,9 +177,9 @@ class ParcelModel:
 
     @property
     def args(self) -> tuple:
-        """The ``(r_drys, Nis, kappas, accom, V)`` parameter tuple for the integrator."""
+        """Integrator parameters, including fixed initial dry-air density as entry six."""
         V = self.V if isinstance(self.V, AbstractUpdraft) else float(self.V)
-        return (self._r_drys, self._Nis, self._kappas, self.accom, V)
+        return (self._r_drys, self._Nis, self._kappas, self.accom, V, self._rho_d0)
 
     def run(
         self,
@@ -409,6 +411,7 @@ class ParcelModel:
                 S0=self.S0,
                 P0=self.P0,
                 accom=self.accom,
+                rho_d0=float(self.args[5]),
             )
 
     # --- diagnostics --------------------------------------------------------------
@@ -433,6 +436,8 @@ class ParcelModel:
         T_nd = float(self.x[i_nd, c.STATE_VAR_MAP["T"]])
         rs_nd = self.x[i_nd, c.N_STATE_VARS :]
         nd_t_eval = float(self.time[i_nd])
+        peak_scale = float(dry_air_density(self.x[si])) / self._rho_d0
+        nd_scale = float(dry_air_density(self.x[i_nd])) / self._rho_d0
 
         per_species = []
         total_N = 0.0
@@ -448,7 +453,8 @@ class ParcelModel:
                 S_max, T_nd, rs_nd[offset : offset + nr], aer.r_drys, aer.Nis, aer.kappa
             )
             offset += nr
-            N = float(np.sum(aer.Nis))
+            N_initial = float(np.sum(aer.Nis))
+            N = N_initial * nd_scale
             Nd_mode = float(nd_frac) * N
             per_species.append(
                 {
@@ -456,13 +462,14 @@ class ParcelModel:
                     "eq_act_frac": float(eq),
                     "kn_act_frac": float(kn),
                     "N": N,
-                    "N_act": float(eq) * N,
+                    "N_initial": N_initial,
+                    "N_act": float(eq) * N_initial * peak_scale,
                     "nd_frac": float(nd_frac),
                     "Nd": Nd_mode,
                 }
             )
-            total_N += N
-            total_act += float(eq) * N
+            total_N += N_initial
+            total_act += float(eq) * N_initial
             total_Nd += Nd_mode
 
         return {
@@ -473,7 +480,7 @@ class ParcelModel:
             "per_species": per_species,
             "total_act_frac": (total_act / total_N) if total_N > 0 else float("nan"),
             "total_Nd": total_Nd,
-            "total_nd_frac": (total_Nd / total_N) if total_N > 0 else float("nan"),
+            "total_nd_frac": (total_Nd / (total_N * nd_scale)) if total_N > 0 else float("nan"),
             "nd_t_eval": nd_t_eval,
         }
 
@@ -498,6 +505,7 @@ class ParcelModel:
             S0=self.S0,
             P0=self.P0,
             accom=self.accom,
+            rho_d0=float(self.args[5]),
         )
 
     def to_dataset(self) -> Any:
