@@ -416,19 +416,24 @@ class ParcelModel:
 
     # --- diagnostics --------------------------------------------------------------
 
-    def _compute_summary(self, peak: object = None) -> dict:
+    def _compute_summary(self, peak: tuple | None = None) -> dict:
         assert self.x is not None
         assert self.time is not None
         if peak is not None:
             # Event-localized or caller-supplied precise S_max/t_smax.
             S_max, t_smax = float(peak[0]), float(peak[1])
-            si = int(np.argmin(np.abs(self.time - t_smax)))
+            if len(peak) >= 3:
+                y_peak = np.asarray(peak[2])
+            else:
+                # Backward-compatible support for callers supplying only S/t.
+                y_peak = np.array(
+                    [np.interp(t_smax, self.time, self.x[:, i]) for i in range(self.x.shape[1])]
+                )
         else:
             # Post-hoc Hermite cubic peak finder — no second solve.
-            S_max, t_smax, _ = _peak_from_trajectory(self.time, self.x, self.args)
-            si = int(np.argmin(np.abs(self.time - t_smax)))
-        T_smax = float(self.x[si, c.STATE_VAR_MAP["T"]])
-        rs_smax = self.x[si, c.N_STATE_VARS :]
+            S_max, t_smax, y_peak = _peak_from_trajectory(self.time, self.x, self.args)
+        T_smax = float(y_peak[c.STATE_VAR_MAP["T"]])
+        rs_smax = y_peak[c.N_STATE_VARS :]
 
         # Nd snapshot: wet radii at the last trajectory step (terminate_depth m past
         # S_max when terminate=True), compared against per-bin critical radii.
@@ -436,7 +441,7 @@ class ParcelModel:
         T_nd = float(self.x[i_nd, c.STATE_VAR_MAP["T"]])
         rs_nd = self.x[i_nd, c.N_STATE_VARS :]
         nd_t_eval = float(self.time[i_nd])
-        peak_scale = float(dry_air_density(self.x[si])) / self._rho_d0
+        peak_scale = float(dry_air_density(y_peak)) / self._rho_d0
         nd_scale = float(dry_air_density(self.x[i_nd])) / self._rho_d0
 
         per_species = []
@@ -476,7 +481,7 @@ class ParcelModel:
             "S_max": S_max,
             "t_smax": t_smax,
             "T_smax": T_smax,
-            "z_smax": float(self.x[si, c.STATE_VAR_MAP["z"]]),
+            "z_smax": float(y_peak[c.STATE_VAR_MAP["z"]]),
             "per_species": per_species,
             "total_act_frac": (total_act / total_N) if total_N > 0 else float("nan"),
             "total_Nd": total_Nd,

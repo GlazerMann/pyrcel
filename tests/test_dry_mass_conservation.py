@@ -219,3 +219,33 @@ def test_summary_number_uses_each_snapshot_density():
     assert mode["N_act"] == pytest.approx(100e6)
     assert mode["Nd"] == pytest.approx(100e6 * final_density / initial_density)
     assert mode["Nd"] < mode["N_act"]
+
+
+@pytest.mark.parametrize("peak_form", ["state", "time", "trajectory"])
+def test_summary_peak_density_matches_the_returned_state(peak_form, monkeypatch):
+    import pyrcel.model as model_module
+
+    model = mono()
+    model.time = np.array([0.0, 1000.0])
+    model.x = np.tile(model.y0, (2, 1))
+    model.x[1, :4] = [500.0, 70000.0, 275.0, 0.008]
+    model.x[1, 6:] = [0.01, 1e-5]
+    peak_state = model.y0.copy()
+    peak_state[:4] = [125.0, 81000.0, 282.0, 0.0088]
+    peak_state[6:] = [0.02, 2e-6]
+    if peak_form == "state":
+        peak = (0.02, 250.0, peak_state)
+    elif peak_form == "time":
+        peak = (0.02, 250.0)
+        peak_state = np.array([np.interp(250.0, model.time, column) for column in model.x.T])
+    else:
+        peak = None
+        monkeypatch.setattr(
+            model_module, "_peak_from_trajectory", lambda *args: (0.02, 250.0, peak_state)
+        )
+    summary = model._compute_summary(peak)
+    rho_initial = model.y0[1] / (c.Rd * model.y0[2] * (1 + model.y0[3] / c.epsilon))
+    rho_peak = peak_state[1] / (c.Rd * peak_state[2] * (1 + peak_state[3] / c.epsilon))
+    assert summary["T_smax"] == pytest.approx(peak_state[2])
+    assert summary["z_smax"] == pytest.approx(peak_state[0])
+    assert summary["per_species"][0]["N_act"] == pytest.approx(100e6 * rho_peak / rho_initial)
